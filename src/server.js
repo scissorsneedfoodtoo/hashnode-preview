@@ -29,6 +29,12 @@ nunjucks.configure('src/templates', {
 app.use(morgan('tiny', { stream: morganStream }));
 app.use(helmet(helmetConfig));
 app.use(frameOptions);
+
+// Registered before rate limit + slug router.
+app.get('/_health', (_req, res) => {
+  res.status(200).json({ status: 'ok', uptime: process.uptime() });
+});
+
 app.use(rateLimitConfig);
 app.use(jsonLimit);
 app.use(cacheControl);
