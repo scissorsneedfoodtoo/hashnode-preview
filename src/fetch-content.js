@@ -1,6 +1,8 @@
-import { request, gql } from 'graphql-request';
+import { request, gql, ClientError } from 'graphql-request';
+import { logger } from './config/logger.js';
 
-const endpoint = process.env.HASHNODE_API_URL || 'https://gql-beta.hashnode.com';
+const endpoint =
+  process.env.HASHNODE_API_URL || 'https://gql-beta.hashnode.com';
 
 const commonFields = `
   id
@@ -66,6 +68,15 @@ const postByIdQuery = gql`
   }
 `;
 
+// Hashnode signals missing resources with HTTP 200 + `errors[].extensions.code === 'NOT_FOUND'`.
+function isNotFoundError(error) {
+  if (!(error instanceof ClientError)) return false;
+  const errors = error.response?.errors ?? [];
+  return (
+    errors.length > 0 && errors.every(e => e?.extensions?.code === 'NOT_FOUND')
+  );
+}
+
 export async function fetchContent(idOrSlug) {
   const isValidObjectId =
     idOrSlug.length === 24 && /^[0-9a-fA-F]{24}$/.test(idOrSlug);
@@ -73,30 +84,39 @@ export async function fetchContent(idOrSlug) {
 
   try {
     if (isValidObjectId) {
-      // Try draft first, then fall back to post-by-id (published posts also
-      // have 24-char hex cuid values)
+      // Try draft first; published posts share the 24-char hex id shape.
       try {
         const response = await request(endpoint, draftQuery, {
           id: idOrSlug
         });
         if (response.draft) return response.draft;
-      } catch {
-        // Draft not found — try as a published post id
+      } catch (error) {
+        if (!isNotFoundError(error)) throw error;
       }
 
-      const response = await request(endpoint, postByIdQuery, {
-        id: idOrSlug
-      });
-      return response.post;
-    } else {
+      try {
+        const response = await request(endpoint, postByIdQuery, {
+          id: idOrSlug
+        });
+        return response.post ?? null;
+      } catch (error) {
+        if (isNotFoundError(error)) return null;
+        throw error;
+      }
+    }
+
+    try {
       const response = await request(endpoint, postBySlugQuery, {
         host: HASHNODE_HOST,
         slug: idOrSlug
       });
-      return response.publication.post;
+      return response.publication?.post ?? null;
+    } catch (error) {
+      if (isNotFoundError(error)) return null;
+      throw error;
     }
   } catch (error) {
-    console.error('Error fetching content:', error);
+    logger.error(`fetchContent failed for "${idOrSlug}": ${error.message}`);
     throw error;
   }
 }
