@@ -1,6 +1,6 @@
 import { request, gql } from 'graphql-request';
 
-const endpoint = 'https://gql.hashnode.com/';
+const endpoint = process.env.HASHNODE_API_URL || 'https://gql-beta.hashnode.com';
 
 const commonFields = `
   id
